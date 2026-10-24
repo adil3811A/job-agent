@@ -1,0 +1,14 @@
+# Secrets
+.env
+creds.json
+*.json
+!profile.json
+
+# Personal data
+samples/
+failed_emails/
+
+# Python
+.venv/
+__pycache__/
+.pytest_cache/

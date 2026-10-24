@@ -1,0 +1,3 @@
+# Local-only extras (apply.py). Not installed in GitHub Actions.
+-r requirements.txt
+playwright
