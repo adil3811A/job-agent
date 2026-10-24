@@ -45,6 +45,8 @@ NON_JOB_SUBJECT = re.compile(r"your application|application (was )?sent|applicat
 
 # UIDs of emails handled by the last fetch_jobs() call, marked read by mark_processed()
 _processed_uids = []
+# Why the last fetch_jobs() couldn't read Gmail (None if it worked); main reports it.
+last_error = None
 
 
 def is_job_email(sender, subject):
@@ -165,9 +167,12 @@ def _connect():
 
 def fetch_jobs(profile=None):
     """Parse unread JobAlerts emails into jobs. Doesn't mark anything read."""
+    global last_error
+    last_error = None
     _processed_uids.clear()
     if not (os.environ.get("GMAIL_USER") and os.environ.get("GMAIL_APP_PASSWORD")):
-        log.info("Gmail skipped: GMAIL_USER / GMAIL_APP_PASSWORD not set")
+        last_error = "GMAIL_USER / GMAIL_APP_PASSWORD not set"
+        log.warning("Gmail skipped: %s", last_error)
         return []
     profile = profile if profile is not None else load_profile()
 
@@ -183,7 +188,8 @@ def fetch_jobs(profile=None):
         finally:
             imap.logout()
     except (imaplib.IMAP4.error, OSError) as e:
-        log.warning("Gmail fetch failed: %s", e)
+        last_error = f"Gmail fetch failed: {e}"
+        log.warning(last_error)
         _processed_uids.clear()
         return []
     return [j for j in jobs if matches_profile(j, profile)]

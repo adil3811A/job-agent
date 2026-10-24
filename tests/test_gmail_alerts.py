@@ -195,6 +195,7 @@ def test_missing_credentials_skip(monkeypatch):
     monkeypatch.delenv("GMAIL_USER", raising=False)
     monkeypatch.setattr(g, "_connect", lambda: pytest.fail("connected"))
     assert g.fetch_jobs(PROFILE) == []
+    assert "not set" in g.last_error
 
 
 def test_imap_error_returns_empty(monkeypatch):
@@ -207,3 +208,10 @@ def test_imap_error_returns_empty(monkeypatch):
     monkeypatch.setattr(g, "_connect", boom)
     assert g.fetch_jobs(PROFILE) == []
     assert g._processed_uids == []
+    assert "LOGIN failed" in g.last_error
+
+
+def test_successful_fetch_clears_last_error(imap):
+    g.last_error = "old"
+    g.fetch_jobs(PROFILE)
+    assert g.last_error is None

@@ -42,6 +42,11 @@ def world(monkeypatch):
     monkeypatch.setattr(main, "add_jobs", add_jobs)
     monkeypatch.setattr(main, "notify_jobs", notify_jobs)
     monkeypatch.setattr(main.gmail_alerts, "mark_processed", mark_processed)
+    monkeypatch.setattr(main.gmail_alerts, "last_error", None)
+    state["warnings"] = []
+    monkeypatch.setattr(main, "send_telegram", state["warnings"].append)
+    for name in main.REQUIRED_ENV:
+        monkeypatch.setenv(name, "x")
     monkeypatch.setattr(main, "score_jobs", lambda jobs, profile: state["scored"].extend(jobs))
     state["scored"] = []
     return state
@@ -98,3 +103,42 @@ def test_main_includes_gmail_and_api_sources():
     assert names[0] == "sources.gmail_alerts"
     assert {"sources.remotive", "sources.arbeitnow", "sources.remoteok",
             "sources.adzuna", "sources.jooble"} <= set(names)
+
+
+def test_missing_secrets_fail_and_warn(world, monkeypatch):
+    monkeypatch.delenv("GMAIL_USER")
+    monkeypatch.setenv("GMAIL_APP_PASSWORD", "")
+    world["jobs"] = [job("https://a/1")]
+    assert main.run() == 1
+    assert world["saved"] == []  # nothing ran
+    assert world["warnings"] == [
+        "⚠️ Job agent: missing settings/secrets: GMAIL_USER, GMAIL_APP_PASSWORD. Nothing was run."]
+
+
+def test_gmail_error_warns_but_other_sources_still_save(world, monkeypatch):
+    class GmailFails:
+        __name__ = "gmail"
+
+        def fetch_jobs(self, profile):
+            main.gmail_alerts.last_error = "Gmail fetch failed: LOGIN failed"
+            return []
+
+    class Api:
+        __name__ = "api"
+
+        def fetch_jobs(self, profile):
+            return [job("https://a/1")]
+
+    monkeypatch.setattr(main, "SOURCES", [GmailFails(), Api()])
+    assert main.run() == 1
+    assert [j["link"] for j in world["saved"]] == ["https://a/1"]
+    assert world["warnings"] == ["⚠️ Job agent: Gmail fetch failed: LOGIN failed"]
+
+
+def test_warning_survives_telegram_failure(world, monkeypatch):
+    def broken(text):
+        raise RuntimeError("telegram down")
+
+    monkeypatch.setattr(main, "send_telegram", broken)
+    monkeypatch.delenv("SHEET_ID")
+    assert main.run() == 1

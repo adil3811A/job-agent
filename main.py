@@ -9,9 +9,10 @@ Order matters:
   6. mark the processed Gmail alerts as read
 """
 import logging
+import os
 import sys
 
-from notify import notify_jobs
+from notify import notify_jobs, send_telegram
 from run_sources import SOURCES as API_SOURCES, collect_jobs
 from scorer import score_jobs
 from sheet import add_jobs, get_existing_links, normalize_link
@@ -20,6 +21,19 @@ from sources import gmail_alerts, load_profile
 log = logging.getLogger("main")
 
 SOURCES = [gmail_alerts, *API_SOURCES]
+
+# Without these the agent can't do its main job; a missing one fails the run (red in Actions).
+REQUIRED_ENV = ["SHEET_ID", "TELEGRAM_TOKEN", "TELEGRAM_CHAT_ID", "GMAIL_USER",
+                "GMAIL_APP_PASSWORD", "GEMINI_API_KEY"]
+
+
+def warn(text):
+    """Log an error and try to send it to Telegram too, so silent failures get noticed."""
+    log.error(text)
+    try:
+        send_telegram(f"⚠️ Job agent: {text}")
+    except Exception:
+        log.exception("Could not send the warning to Telegram")
 
 
 def dedupe(jobs, existing_links):
@@ -39,8 +53,17 @@ def should_alert(job, min_score):
 
 def run():
     """Run once. Returns the process exit code (0 ok, 1 if anything failed)."""
+    missing = [name for name in REQUIRED_ENV if not os.environ.get(name)]
+    if missing:
+        warn(f"missing settings/secrets: {', '.join(missing)}. Nothing was run.")
+        return 1
+
     profile = load_profile()
     jobs = collect_jobs(profile, SOURCES)
+    exit_code = 0
+    if gmail_alerts.last_error:
+        warn(gmail_alerts.last_error)  # other sources still run; the run ends red
+        exit_code = 1
 
     try:
         new = dedupe(jobs, get_existing_links())
@@ -57,7 +80,6 @@ def run():
         log.exception("Saving to the Sheet failed; no alerts sent, emails left unread")
         return 1
 
-    exit_code = 0
     to_alert = [j for j in new if should_alert(j, profile.get("min_score", 7))]
     try:
         notify_jobs(to_alert)
